@@ -3099,9 +3099,15 @@ namespace BrightIdeasSoftware
             if (useHiddenGroup && ensureHiddenGroup && this.GetItemCount() > 0) {
                 this.EnsureHiddenSingleGroupForSmoothPixelScrolling();
             } else if (hiddenGroupModeChanged) {
-                this.Groups.Clear();
-                this.OLVGroups = null;
+                this.ClearGroupsForSmoothPixelScrolling();
             }
+        }
+
+        private void ClearGroupsForSmoothPixelScrolling() {
+            foreach (ListViewGroup group in this.Groups)
+                group.Items.Clear();
+            this.Groups.Clear();
+            this.OLVGroups = null;
         }
 
         /// <summary>
@@ -8955,6 +8961,8 @@ namespace BrightIdeasSoftware
             List<OLVListItem> items = new List<OLVListItem>(this.Items.Count);
             foreach (OLVListItem item in this.Items)
                 items.Add(item);
+
+            this.ClearGroupsForSmoothPixelScrolling();
 
             OLVGroup group = new OLVGroup(String.Empty);
             group.Items = items;
