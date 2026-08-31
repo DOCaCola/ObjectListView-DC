@@ -5969,6 +5969,8 @@ namespace BrightIdeasSoftware
             const int CDDS_SUBITEMPREPAINT = (CDDS_SUBITEM | CDDS_ITEMPREPAINT);
             const int CDDS_SUBITEMPOSTPAINT = (CDDS_SUBITEM | CDDS_ITEMPOSTPAINT);
             const int CDRF_NOTIFYPOSTPAINT = 0x10;
+            const int CDIS_SELECTED = 0x0001;
+            const int CDIS_HOT = 0x0040;
             //const int CDRF_NOTIFYITEMDRAW = 0x20;
             //const int CDRF_NOTIFYSUBITEMDRAW = 0x20; // same value as above!
             const int CDRF_NOTIFYPOSTERASE = 0x40;
@@ -6044,6 +6046,32 @@ namespace BrightIdeasSoftware
 
                 case CDDS_ITEMPREPAINT:
                     //System.Diagnostics.Debug.WriteLine("CDDS_ITEMPREPAINT");
+
+                    // Native drawing would otherwise paint opaque selected/hot backgrounds
+                    // underneath ObjectListView's translucent row decorations.
+                    if (!this.OwnerDraw) {
+                        OLVListItem decoratedItem = null;
+                        if ((nmcustomdraw.nmcd.uItemState & (CDIS_SELECTED | CDIS_HOT)) != 0)
+                            decoratedItem = this.GetItem((int)nmcustomdraw.nmcd.dwItemSpec);
+
+                        bool canDrawRowDecoration = decoratedItem != null && decoratedItem.Enabled;
+                        bool stateChanged = false;
+                        if (this.SelectedRowDecoration != null
+                            && canDrawRowDecoration
+                            && (nmcustomdraw.nmcd.uItemState & CDIS_SELECTED) != 0) {
+                            nmcustomdraw.nmcd.uItemState &= ~CDIS_SELECTED;
+                            stateChanged = true;
+                        }
+                        if (this.UseHotItem
+                            && this.HotItemStyleOrDefault.Decoration != null
+                            && canDrawRowDecoration
+                            && (nmcustomdraw.nmcd.uItemState & CDIS_HOT) != 0) {
+                            nmcustomdraw.nmcd.uItemState &= ~CDIS_HOT;
+                            stateChanged = true;
+                        }
+                        if (stateChanged)
+                            Marshal.StructureToPtr(nmcustomdraw, m.LParam, false);
+                    }
 
                     // When in group view on XP, the control send a whole heap of PREPAINT/POSTPAINT
                     // messages before drawing any items.

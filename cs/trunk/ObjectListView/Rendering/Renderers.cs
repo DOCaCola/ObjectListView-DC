@@ -1477,7 +1477,32 @@ namespace BrightIdeasSoftware {
         /// <param name="g">Graphics context to use for drawing</param>
         /// <param name="r">Pre-padded bounds of the cell</param>
         protected virtual void DrawAlignedImageAndText(Graphics g, Rectangle r) {
+            if (this.CanDrawTextWithoutMeasuring()) {
+                this.DrawText(g, r, this.GetText());
+                return;
+            }
+
             this.DrawImageAndText(g, this.CalculateAlignedRectangle(g, r));
+        }
+
+        /// <summary>
+        /// Can this cell draw its text directly into the available cell bounds without
+        /// measuring the text first?
+        /// </summary>
+        /// <remarks>
+        /// TextRenderer can perform horizontal and vertical alignment itself. Measuring
+        /// remains necessary when images or checkboxes share the cell, and for non-GDI
+        /// or wrapped text.
+        /// </remarks>
+        protected virtual bool CanDrawTextWithoutMeasuring() {
+            if (!this.UseGdiTextRendering || this.Column == null || this.CanWrapOrDefault)
+                return false;
+
+            if (this.Column.Index == 0 && this.ListView.CheckBoxes)
+                return false;
+
+            object imageSelector = this.GetImageSelector();
+            return imageSelector == null || imageSelector == DBNull.Value;
         }
 
         /// <summary>
@@ -1762,6 +1787,14 @@ namespace BrightIdeasSoftware {
                 backColor = this.GetSelectedBackgroundColor();
 
             TextFormatFlags flags = NormalTextFormatFlags | this.CellVerticalAlignmentAsTextFormatFlag;
+            switch (this.CellHorizontalAlignment) {
+                case HorizontalAlignment.Center:
+                    flags |= TextFormatFlags.HorizontalCenter;
+                    break;
+                case HorizontalAlignment.Right:
+                    flags |= TextFormatFlags.Right;
+                    break;
+            }
 
             // I think there is a bug in the TextRenderer. Setting or not setting SingleLine doesn't make 
             // any difference -- it is always single line.
@@ -2150,6 +2183,15 @@ namespace BrightIdeasSoftware {
         /// </summary>
         protected bool ShouldDrawHighlighting {
             get { return this.Column == null || (this.Column.Searchable && this.Filter != null); }
+        }
+
+        /// <summary>
+        /// Keep the measured rendering path while text highlighting is active because
+        /// highlight placement depends on the measured text bounds.
+        /// </summary>
+        protected override bool CanDrawTextWithoutMeasuring() {
+            return !this.ShouldDrawHighlighting
+                && base.CanDrawTextWithoutMeasuring();
         }
 
         /// <summary>
