@@ -977,6 +977,23 @@ namespace BrightIdeasSoftware
         private bool allowCellEditorsToProcessMouseWheel = true;
 
         /// <summary>
+        /// Gets or sets whether mouse wheel input should scroll the control by pixels,
+        /// including high-resolution wheel deltas smaller than one detent.
+        /// </summary>
+        [Category("ObjectListView"),
+        Description("Should mouse wheel input scroll the control by pixels?"),
+        DefaultValue(false)]
+        public virtual bool UseSmoothPixelScrolling {
+            get { return this.useSmoothPixelScrolling; }
+            set {
+                this.useSmoothPixelScrolling = value;
+                this.smoothScrollWheelRemainder = 0;
+            }
+        }
+        private bool useSmoothPixelScrolling;
+        private int smoothScrollWheelRemainder;
+
+        /// <summary>
         /// Gets or sets the background color of every second row 
         /// </summary>
         [Category("ObjectListView"),
@@ -5798,6 +5815,11 @@ namespace BrightIdeasSoftware
                         base.WndProc(ref m);
                     break;
                 case 0x20A: // WM_MOUSEWHEEL:
+                    if (this.AllowCellEditorsToProcessMouseWheel && this.IsCellEditing)
+                        break;
+                    if (this.PossibleFinishCellEditing() && !this.HandleSmoothMouseWheel(ref m))
+                        base.WndProc(ref m);
+                    break;
                 case 0x20E: // WM_MOUSEHWHEEL:
                     if (this.AllowCellEditorsToProcessMouseWheel && this.IsCellEditing)
                         break;
@@ -5821,6 +5843,55 @@ namespace BrightIdeasSoftware
                     base.WndProc(ref m);
                     break;
             }
+        }
+
+        /// <summary>
+        /// Handle vertical mouse wheel input as pixel scrolling when enabled.
+        /// </summary>
+        /// <param name="m">The mouse wheel message</param>
+        /// <returns>True when the message has been handled</returns>
+        protected virtual bool HandleSmoothMouseWheel(ref Message m) {
+            if (!this.UseSmoothPixelScrolling)
+                return false;
+
+            long wParam = m.WParam.ToInt64();
+            int delta = (short)((wParam >> 16) & 0xffff);
+            long lParam = m.LParam.ToInt64();
+            int x = (short)(lParam & 0xffff);
+            int y = (short)((lParam >> 16) & 0xffff);
+            Point clientPoint = this.PointToClient(new Point(x, y));
+            HandledMouseEventArgs args = new HandledMouseEventArgs(
+                MouseButtons.None, 0, clientPoint.X, clientPoint.Y, delta);
+            this.OnMouseWheel(args);
+            if (args.Handled)
+                return true;
+
+            int scrollLines = SystemInformation.MouseWheelScrollLines;
+            if (scrollLines == 0 || delta == 0)
+                return true;
+
+            int scrollDistance;
+            if (scrollLines < 0) {
+                scrollDistance = Math.Max(1, this.ClientSize.Height - this.Font.Height);
+            } else {
+                int rowHeight = this.Font.Height + 1;
+                if (this.GetItemCount() > 0) {
+                    OLVListItem item = this.GetItem(0);
+                    if (item != null && item.Bounds.Height > 0)
+                        rowHeight = item.Bounds.Height;
+                }
+                scrollDistance = Math.Max(1, scrollLines * rowHeight);
+            }
+
+            long accumulatedDistance = this.smoothScrollWheelRemainder
+                - ((long)delta * scrollDistance);
+            int pixels = (int)(accumulatedDistance / 120);
+            this.smoothScrollWheelRemainder = (int)(accumulatedDistance % 120);
+            if (pixels != 0)
+                this.LowLevelScroll(0, pixels);
+
+            m.Result = IntPtr.Zero;
+            return true;
         }
 
         /// <summary>
@@ -6011,7 +6082,7 @@ namespace BrightIdeasSoftware
                     //System.Diagnostics.Debug.WriteLine("CDDS_PREPAINT");
                     // Remember which items were drawn during this paint cycle
                     if (this.prePaintLevel == 0)
-                        this.drawnItems = new List<OLVListItem>();
+                        this.drawnItems.Clear();
 
                     // If there are any items, we have to wait until at least one has been painted
                     // before we draw the overlays. If there aren't any items, there will never be any
@@ -6047,13 +6118,13 @@ namespace BrightIdeasSoftware
                 case CDDS_ITEMPREPAINT:
                     //System.Diagnostics.Debug.WriteLine("CDDS_ITEMPREPAINT");
 
+                    OLVListItem decoratedItem = null;
+                    if (this.Columns.Count > 0)
+                        decoratedItem = this.GetItem((int)nmcustomdraw.nmcd.dwItemSpec);
+
                     // Native drawing would otherwise paint opaque selected/hot backgrounds
                     // underneath ObjectListView's translucent row decorations.
                     if (!this.OwnerDraw) {
-                        OLVListItem decoratedItem = null;
-                        if ((nmcustomdraw.nmcd.uItemState & (CDIS_SELECTED | CDIS_HOT)) != 0)
-                            decoratedItem = this.GetItem((int)nmcustomdraw.nmcd.dwItemSpec);
-
                         bool canDrawRowDecoration = decoratedItem != null && decoratedItem.Enabled;
                         bool stateChanged = false;
                         if (this.SelectedRowDecoration != null
@@ -6071,6 +6142,9 @@ namespace BrightIdeasSoftware
                         }
                         if (stateChanged)
                             Marshal.StructureToPtr(nmcustomdraw, m.LParam, false);
+
+                        if (this.ItemNeedsDecorationDrawing(decoratedItem))
+                            this.drawnItems.Add(decoratedItem);
                     }
 
                     // When in group view on XP, the control send a whole heap of PREPAINT/POSTPAINT
@@ -6091,14 +6165,15 @@ namespace BrightIdeasSoftware
                         base.WndProc(ref m);
                     }
 
-                    m.Result = (IntPtr)((int)m.Result | CDRF_NOTIFYPOSTPAINT | CDRF_NOTIFYPOSTERASE);
+                    if (this.OwnerDraw)
+                        m.Result = (IntPtr)((int)m.Result | CDRF_NOTIFYPOSTPAINT | CDRF_NOTIFYPOSTERASE);
                     return true;
 
                 case CDDS_ITEMPOSTPAINT:
                     //System.Diagnostics.Debug.WriteLine("CDDS_ITEMPOSTPAINT");
                     // Remember which items have been drawn so we can draw any decorations for them
                     // once all other painting is finished
-                    if (this.Columns.Count > 0) {
+                    if (this.OwnerDraw && this.Columns.Count > 0) {
                         OLVListItem olvi = this.GetItem((int)nmcustomdraw.nmcd.dwItemSpec);
                         if (olvi != null)
                             this.drawnItems.Add(olvi);
@@ -6184,7 +6259,22 @@ namespace BrightIdeasSoftware
             return false;
         }
         bool isAfterItemPaint;
-        List<OLVListItem> drawnItems;
+        readonly List<OLVListItem> drawnItems = new List<OLVListItem>();
+
+        private bool ItemNeedsDecorationDrawing(OLVListItem item) {
+            if (item == null)
+                return false;
+
+            if (item.HasDecoration)
+                return true;
+
+            foreach (OLVListSubItem subItem in item.SubItems) {
+                if (subItem.HasDecoration)
+                    return true;
+            }
+
+            return this.SelectedRowDecoration != null && item.Selected && item.Enabled;
+        }
 
         /// <summary>
         /// Handle the underlying control being destroyed
