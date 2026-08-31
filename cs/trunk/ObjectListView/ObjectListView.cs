@@ -3081,6 +3081,7 @@ namespace BrightIdeasSoftware
         private bool showGroups = true;
         private bool useHiddenSingleGroupForSmoothPixelScrolling;
         private ListViewGroup hiddenSingleGroupForSmoothPixelScrolling;
+        private bool hiddenSingleGroupOrderDirty;
 
         private void UpdateSmoothPixelScrollingGroupMode(bool ensureHiddenGroup = true) {
             bool useHiddenGroup = this.UseSmoothPixelScrolling
@@ -3111,6 +3112,7 @@ namespace BrightIdeasSoftware
             NativeMethods.ClearGroups(this);
             this.OLVGroups = null;
             this.hiddenSingleGroupForSmoothPixelScrolling = null;
+            this.hiddenSingleGroupOrderDirty = false;
         }
 
         /// <summary>
@@ -4746,8 +4748,10 @@ namespace BrightIdeasSoftware
                             ourObjects.Insert(i, modelObject);
                             OLVListItem lvi = new OLVListItem(modelObject);
                             this.FillInValues(lvi, modelObject);
-                            if (this.hiddenSingleGroupForSmoothPixelScrolling != null)
+                            if (this.hiddenSingleGroupForSmoothPixelScrolling != null) {
                                 lvi.Group = this.hiddenSingleGroupForSmoothPixelScrolling;
+                                this.hiddenSingleGroupOrderDirty = true;
+                            }
                             this.Items.Insert(i, lvi);
                             i++;
                         }
@@ -8983,6 +8987,10 @@ namespace BrightIdeasSoftware
                     if (item.Group != this.hiddenSingleGroupForSmoothPixelScrolling)
                         item.Group = this.hiddenSingleGroupForSmoothPixelScrolling;
                 }
+                if (this.hiddenSingleGroupOrderDirty) {
+                    this.SynchronizeHiddenSingleGroupItemOrder(items);
+                    this.hiddenSingleGroupOrderDirty = false;
+                }
                 return;
             }
 
@@ -8998,6 +9006,32 @@ namespace BrightIdeasSoftware
             this.OLVGroups = groups;
             this.CreateGroups(groups);
             this.hiddenSingleGroupForSmoothPixelScrolling = this.Groups[0];
+            this.hiddenSingleGroupOrderDirty = false;
+        }
+
+        private void SynchronizeHiddenSingleGroupItemOrder(IList<OLVListItem> items) {
+            if (items.Count < 2)
+                return;
+
+            // A native grouped ListView appends newly assigned items to the group,
+            // regardless of their position in Items. Reapply the Items order once.
+            this.ListViewItemSorter = new ListViewItemOrderComparer(items);
+            this.ListViewItemSorter = null;
+        }
+
+        private sealed class ListViewItemOrderComparer : IComparer {
+            private readonly Dictionary<OLVListItem, int> itemOrder;
+
+            public ListViewItemOrderComparer(IList<OLVListItem> items) {
+                this.itemOrder = new Dictionary<OLVListItem, int>(items.Count);
+                for (int i = 0; i < items.Count; i++)
+                    this.itemOrder[items[i]] = i;
+            }
+
+            public int Compare(object x, object y) {
+                return this.itemOrder[(OLVListItem)x].CompareTo(
+                    this.itemOrder[(OLVListItem)y]);
+            }
         }
 
         /// <summary>
