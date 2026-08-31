@@ -3081,7 +3081,7 @@ namespace BrightIdeasSoftware
         private bool showGroups = true;
         private bool useHiddenSingleGroupForSmoothPixelScrolling;
 
-        private void UpdateSmoothPixelScrollingGroupMode() {
+        private void UpdateSmoothPixelScrollingGroupMode(bool ensureHiddenGroup = true) {
             bool useHiddenGroup = this.UseSmoothPixelScrolling
                 && !this.ShowGroups
                 && !this.VirtualMode
@@ -3096,7 +3096,7 @@ namespace BrightIdeasSoftware
             if (!this.IsHandleCreated)
                 return;
 
-            if (useHiddenGroup && this.GetItemCount() > 0) {
+            if (useHiddenGroup && ensureHiddenGroup && this.GetItemCount() > 0) {
                 this.EnsureHiddenSingleGroupForSmoothPixelScrolling();
             } else if (hiddenGroupModeChanged) {
                 this.Groups.Clear();
@@ -9720,7 +9720,7 @@ namespace BrightIdeasSoftware
 
             this.UseExplorerTheme = this.UseExplorerTheme;
 
-            this.UpdateSmoothPixelScrollingGroupMode();
+            this.UpdateSmoothPixelScrollingGroupMode(false);
             this.RememberDisplayIndicies();
             this.SetGroupSpacing();
 
