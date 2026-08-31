@@ -9720,6 +9720,7 @@ namespace BrightIdeasSoftware
 
             this.UseExplorerTheme = this.UseExplorerTheme;
 
+            this.UpdateSmoothPixelScrollingGroupMode();
             this.RememberDisplayIndicies();
             this.SetGroupSpacing();
 
