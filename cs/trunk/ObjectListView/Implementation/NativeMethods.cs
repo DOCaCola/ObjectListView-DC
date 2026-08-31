@@ -1206,8 +1206,8 @@ namespace BrightIdeasSoftware
             return (int)NativeMethods.SendMessage(olv.Handle, LVM_SETGROUPMETRICS, 0, ref metrics);
         }
 
-        public static void ClearGroups(VirtualObjectListView virtualObjectListView) {
-            NativeMethods.SendMessage(virtualObjectListView.Handle, LVM_REMOVEALLGROUPS, 0, 0);
+        public static void ClearGroups(ObjectListView objectListView) {
+            NativeMethods.SendMessage(objectListView.Handle, LVM_REMOVEALLGROUPS, 0, 0);
         }
 
         public static void SetGroupImageList(ObjectListView olv, ImageList il) {

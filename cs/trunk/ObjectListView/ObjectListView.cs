@@ -3106,6 +3106,7 @@ namespace BrightIdeasSoftware
         private void ClearGroupsForSmoothPixelScrolling() {
             foreach (ListViewGroup group in this.Groups)
                 group.Items.Clear();
+            NativeMethods.ClearGroups(this);
             this.Groups.Clear();
             this.OLVGroups = null;
         }
