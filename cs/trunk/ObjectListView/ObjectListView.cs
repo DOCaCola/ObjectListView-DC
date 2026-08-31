@@ -3080,6 +3080,7 @@ namespace BrightIdeasSoftware
         }
         private bool showGroups = true;
         private bool useHiddenSingleGroupForSmoothPixelScrolling;
+        private ListViewGroup hiddenSingleGroupForSmoothPixelScrolling;
 
         private void UpdateSmoothPixelScrollingGroupMode(bool ensureHiddenGroup = true) {
             bool useHiddenGroup = this.UseSmoothPixelScrolling
@@ -3106,9 +3107,10 @@ namespace BrightIdeasSoftware
         private void ClearGroupsForSmoothPixelScrolling() {
             foreach (ListViewGroup group in this.Groups)
                 group.Items.Clear();
-            NativeMethods.ClearGroups(this);
             this.Groups.Clear();
+            NativeMethods.ClearGroups(this);
             this.OLVGroups = null;
+            this.hiddenSingleGroupForSmoothPixelScrolling = null;
         }
 
         /// <summary>
@@ -4362,6 +4364,8 @@ namespace BrightIdeasSoftware
                     foreach (object rowObject in objectsToDisplay) {
                         OLVListItem lvi = new OLVListItem(rowObject);
                         this.FillInValues(lvi, rowObject);
+                        if (this.hiddenSingleGroupForSmoothPixelScrolling != null)
+                            lvi.Group = this.hiddenSingleGroupForSmoothPixelScrolling;
                         itemList.Add(lvi);
                     }
                     this.Items.AddRange(itemList.ToArray());
@@ -4742,6 +4746,8 @@ namespace BrightIdeasSoftware
                             ourObjects.Insert(i, modelObject);
                             OLVListItem lvi = new OLVListItem(modelObject);
                             this.FillInValues(lvi, modelObject);
+                            if (this.hiddenSingleGroupForSmoothPixelScrolling != null)
+                                lvi.Group = this.hiddenSingleGroupForSmoothPixelScrolling;
                             this.Items.Insert(i, lvi);
                             i++;
                         }
@@ -5151,17 +5157,24 @@ namespace BrightIdeasSoftware
 
                 this.TakeOwnershipOfObjects();
                 ArrayList ourObjects = ObjectListView.EnumerableToArray(this.Objects, false);
-                foreach (object modelObject in modelObjects) {
-                    if (modelObject != null) {
+                if (this.useHiddenSingleGroupForSmoothPixelScrolling)
+                    base.ShowGroups = false;
+                try {
+                    foreach (object modelObject in modelObjects) {
+                        if (modelObject != null) {
 // ReSharper disable PossibleMultipleEnumeration
-                        int i = ourObjects.IndexOf(modelObject);
-                        if (i >= 0)
-                            ourObjects.RemoveAt(i);
+                            int i = ourObjects.IndexOf(modelObject);
+                            if (i >= 0)
+                                ourObjects.RemoveAt(i);
 // ReSharper restore PossibleMultipleEnumeration
-                        i = this.IndexOf(modelObject);
-                        if (i >= 0)
-                            this.Items.RemoveAt(i);
+                            i = this.IndexOf(modelObject);
+                            if (i >= 0)
+                                this.Items.RemoveAt(i);
+                        }
                     }
+                } finally {
+                    if (this.useHiddenSingleGroupForSmoothPixelScrolling)
+                        base.ShowGroups = true;
                 }
                 this.PostProcessRows();
 
@@ -8963,6 +8976,16 @@ namespace BrightIdeasSoftware
             foreach (OLVListItem item in this.Items)
                 items.Add(item);
 
+            if (this.hiddenSingleGroupForSmoothPixelScrolling != null
+                && this.Groups.Contains(this.hiddenSingleGroupForSmoothPixelScrolling)) {
+                this.OLVGroups[0].Items = items;
+                foreach (OLVListItem item in items) {
+                    if (item.Group != this.hiddenSingleGroupForSmoothPixelScrolling)
+                        item.Group = this.hiddenSingleGroupForSmoothPixelScrolling;
+                }
+                return;
+            }
+
             this.ClearGroupsForSmoothPixelScrolling();
 
             OLVGroup group = new OLVGroup(String.Empty);
@@ -8974,6 +8997,7 @@ namespace BrightIdeasSoftware
             groups.Add(group);
             this.OLVGroups = groups;
             this.CreateGroups(groups);
+            this.hiddenSingleGroupForSmoothPixelScrolling = this.Groups[0];
         }
 
         /// <summary>
