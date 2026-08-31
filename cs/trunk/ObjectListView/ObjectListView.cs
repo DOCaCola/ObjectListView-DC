@@ -980,14 +980,23 @@ namespace BrightIdeasSoftware
         /// Gets or sets whether mouse wheel input should scroll the control by pixels,
         /// including high-resolution wheel deltas smaller than one detent.
         /// </summary>
+        /// <remarks>
+        /// In an ungrouped, non-virtual Details view, ObjectListView transparently
+        /// uses a native headerless group because the Windows list view otherwise
+        /// rounds vertical LVM_SCROLL distances to complete rows.
+        /// </remarks>
         [Category("ObjectListView"),
         Description("Should mouse wheel input scroll the control by pixels?"),
         DefaultValue(false)]
         public virtual bool UseSmoothPixelScrolling {
             get { return this.useSmoothPixelScrolling; }
             set {
+                if (this.useSmoothPixelScrolling == value)
+                    return;
+
                 this.useSmoothPixelScrolling = value;
                 this.smoothScrollWheelRemainder = 0;
+                this.UpdateSmoothPixelScrollingGroupMode();
             }
         }
         private bool useSmoothPixelScrolling;
@@ -3062,10 +3071,36 @@ namespace BrightIdeasSoftware
          Description("Should the list view show items in groups?"),
          DefaultValue(true)]
         public new virtual bool ShowGroups {
-            get { return base.ShowGroups; }
+            get { return this.showGroups; }
             set {
                 this.GroupImageList = this.GroupImageList;
-                base.ShowGroups = value; 
+                this.showGroups = value;
+                this.UpdateSmoothPixelScrollingGroupMode();
+            }
+        }
+        private bool showGroups = true;
+        private bool useHiddenSingleGroupForSmoothPixelScrolling;
+
+        private void UpdateSmoothPixelScrollingGroupMode() {
+            bool useHiddenGroup = this.UseSmoothPixelScrolling
+                && !this.ShowGroups
+                && !this.VirtualMode
+                && this.View == View.Details;
+            bool nativeGroupsEnabled = this.ShowGroups || useHiddenGroup;
+            bool hiddenGroupModeChanged =
+                this.useHiddenSingleGroupForSmoothPixelScrolling != useHiddenGroup;
+
+            this.useHiddenSingleGroupForSmoothPixelScrolling = useHiddenGroup;
+            base.ShowGroups = nativeGroupsEnabled;
+
+            if (!this.IsHandleCreated)
+                return;
+
+            if (useHiddenGroup && this.GetItemCount() > 0) {
+                this.EnsureHiddenSingleGroupForSmoothPixelScrolling();
+            } else if (hiddenGroupModeChanged) {
+                this.Groups.Clear();
+                this.OLVGroups = null;
             }
         }
 
@@ -3739,6 +3774,7 @@ namespace BrightIdeasSoftware
 
                 if (this.Frozen) {
                     base.View = value;
+                    this.UpdateSmoothPixelScrollingGroupMode();
                     this.SetupBaseImageList();
                 } else {
                     this.Freeze();
@@ -3747,6 +3783,7 @@ namespace BrightIdeasSoftware
                         this.CalculateReasonableTileSize();
 
                     base.View = value;
+                    this.UpdateSmoothPixelScrollingGroupMode();
                     this.SetupBaseImageList();
                     this.Unfreeze();
                 }
@@ -4339,7 +4376,7 @@ namespace BrightIdeasSoftware
             if (shouldPreserveState) {
                 // Restore the scroll position. TopItemIndex is best, but doesn't work
                 // when the control is grouped.
-                if (this.ShowGroups)
+                if (this.ShowGroups || this.useHiddenSingleGroupForSmoothPixelScrolling)
                     this.LowLevelScroll(currentScrollPosition.X, currentScrollPosition.Y);
                 else
                     this.TopItemIndex = previousTopIndex;
@@ -8893,6 +8930,8 @@ namespace BrightIdeasSoftware
             int count = this.Items.Count;
 #pragma warning restore 168
 
+            this.EnsureHiddenSingleGroupForSmoothPixelScrolling();
+
             int i = 0;
             if (this.ShowGroups) {
                 foreach (ListViewGroup group in this.Groups) {
@@ -8907,6 +8946,25 @@ namespace BrightIdeasSoftware
                     i++;
                 }
             }
+        }
+
+        private void EnsureHiddenSingleGroupForSmoothPixelScrolling() {
+            if (!this.useHiddenSingleGroupForSmoothPixelScrolling)
+                return;
+
+            List<OLVListItem> items = new List<OLVListItem>(this.Items.Count);
+            foreach (OLVListItem item in this.Items)
+                items.Add(item);
+
+            OLVGroup group = new OLVGroup(String.Empty);
+            group.Items = items;
+            group.State |= GroupState.LVGS_NOHEADER;
+            group.StateMask |= GroupState.LVGS_NOHEADER;
+
+            List<OLVGroup> groups = new List<OLVGroup>(1);
+            groups.Add(group);
+            this.OLVGroups = groups;
+            this.CreateGroups(groups);
         }
 
         /// <summary>
