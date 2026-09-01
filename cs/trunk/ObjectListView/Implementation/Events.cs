@@ -223,6 +223,20 @@ namespace BrightIdeasSoftware {
         public event EventHandler<ToolTipShowingEventArgs> CellToolTipShowing;
 
         /// <summary>
+        /// This event is triggered when the outermost check state update begins.
+        /// </summary>
+        [Category("ObjectListView"),
+         Description("This event is triggered when a check state update begins.")]
+        public event EventHandler CheckStateUpdateStarting;
+
+        /// <summary>
+        /// This event is triggered when the outermost check state update finishes.
+        /// </summary>
+        [Category("ObjectListView"),
+         Description("This event is triggered when a check state update finishes.")]
+        public event EventHandler CheckStateUpdateFinished;
+
+        /// <summary>
         /// This event is triggered when a checkbox is checked/unchecked on a subitem
         /// </summary>
         [Category("ObjectListView"),
@@ -519,6 +533,22 @@ namespace BrightIdeasSoftware {
         protected virtual void OnCellToolTip(ToolTipShowingEventArgs args) {
             if (this.CellToolTipShowing != null)
                 this.CellToolTipShowing(this, args);
+        }
+
+        /// <summary>
+        /// Tell the world that the outermost check state update has begun.
+        /// </summary>
+        protected virtual void OnCheckStateUpdateStarting(EventArgs e) {
+            if (this.CheckStateUpdateStarting != null)
+                this.CheckStateUpdateStarting(this, e);
+        }
+
+        /// <summary>
+        /// Tell the world that the outermost check state update has finished.
+        /// </summary>
+        protected virtual void OnCheckStateUpdateFinished(EventArgs e) {
+            if (this.CheckStateUpdateFinished != null)
+                this.CheckStateUpdateFinished(this, e);
         }
 
         /// <summary>

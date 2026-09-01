@@ -116,7 +116,7 @@ namespace BrightIdeasSoftware {
         /// </remarks>
         new public bool Checked {
             get {
-                return base.Checked;
+                return this.CheckState != System.Windows.Forms.CheckState.Unchecked;
             }
             set {
                 if (this.Checked != value) {
@@ -135,6 +135,13 @@ namespace BrightIdeasSoftware {
         /// and will return True for both Checked and Indeterminate states.</remarks>
         public CheckState CheckState {
             get {
+                ObjectListView objectListView = this.ListView as ObjectListView;
+                if (objectListView != null && objectListView.UseNativeCheckStateUpdates) {
+                    CheckState? modelState = objectListView.GetCheckStateForItem(this.RowObject);
+                    if (modelState.HasValue)
+                        return modelState.Value;
+                }
+
                 switch (this.StateImageIndex) {
                     case 0:
                         return System.Windows.Forms.CheckState.Unchecked;

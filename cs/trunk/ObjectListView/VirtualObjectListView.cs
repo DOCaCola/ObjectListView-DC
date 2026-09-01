@@ -201,39 +201,43 @@ namespace BrightIdeasSoftware
                 if (!this.CheckBoxes)
                     return;
 
-                // If a custom check state getter is install, we can't use our check state management
-                // We have to use the (slower) base version.
-                if (this.CheckStateGetter != null) {
-                    base.CheckedObjects = value;
-                    return;
+                using (this.BeginCheckStateUpdate()) {
+                    // If a custom check state getter is install, we can't use our check state management
+                    // We have to use the (slower) base version.
+                    if (this.CheckStateGetter != null) {
+                        base.CheckedObjects = value;
+                        return;
+                    }
+
+                    Stopwatch sw = Stopwatch.StartNew();
+
+                    // Set up an efficient way of testing for the presence of a particular model
+                    Hashtable table = new Hashtable(this.GetItemCount());
+                    if (value != null) {
+                        foreach (object x in value)
+                            table[x] = true;
+                    }
+
+                    this.BeginUpdate();
+                    try {
+                        // Uncheck anything that is no longer checked
+                        Object[] keys = new Object[this.CheckStateMap.Count];
+                        this.CheckStateMap.Keys.CopyTo(keys, 0);
+                        foreach (Object key in keys) {
+                            if (!table.Contains(key))
+                                this.SetObjectCheckedness(key, CheckState.Unchecked);
+                        }
+
+                        // Check all the new checked objects
+                        foreach (Object x in table.Keys)
+                            this.SetObjectCheckedness(x, CheckState.Checked);
+                    }
+                    finally {
+                        this.EndUpdate();
+                    }
+
+                    // Debug.WriteLine(String.Format("PERF - Setting virtual CheckedObjects on {2} objects took {0}ms / {1} ticks", sw.ElapsedMilliseconds, sw.ElapsedTicks, this.GetItemCount()));
                 }
-
-                Stopwatch sw = Stopwatch.StartNew();
-
-                // Set up an efficient way of testing for the presence of a particular model
-                Hashtable table = new Hashtable(this.GetItemCount());
-                if (value != null) {
-                    foreach (object x in value)
-                        table[x] = true;
-                }
-
-                this.BeginUpdate();
-
-                // Uncheck anything that is no longer checked
-                Object[] keys = new Object[this.CheckStateMap.Count];
-                this.CheckStateMap.Keys.CopyTo(keys, 0);
-                foreach (Object key in keys) {
-                    if (!table.Contains(key))
-                        this.SetObjectCheckedness(key, CheckState.Unchecked);
-                }
-
-                // Check all the new checked objects
-                foreach (Object x in table.Keys)
-                    this.SetObjectCheckedness(x, CheckState.Checked);
-
-                this.EndUpdate();
-
-                // Debug.WriteLine(String.Format("PERF - Setting virtual CheckedObjects on {2} objects took {0}ms / {1} ticks", sw.ElapsedMilliseconds, sw.ElapsedTicks, this.GetItemCount()));
             }
         }
 

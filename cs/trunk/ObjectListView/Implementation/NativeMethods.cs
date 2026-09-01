@@ -77,6 +77,7 @@ namespace BrightIdeasSoftware
         private const int LVIF_STATE = 0x0008;
         private const int LVIF_INDENT = 0x0010;
         private const int LVIF_NORECOMPUTE = 0x0800;
+        private const int LVIS_STATEIMAGEMASK = 0xF000;
 
         private const int LVIS_SELECTED = 2;
 
@@ -960,6 +961,14 @@ namespace BrightIdeasSoftware
             lvItem.stateMask = mask;
             lvItem.state = value;
             SendMessageLVItem(list.Handle, LVM_SETITEMSTATE, itemIndex, ref lvItem);
+        }
+
+        /// <summary>
+        /// Set the primary check state image of an item directly through the native control.
+        /// </summary>
+        public static void SetItemCheckState(ListView list, int itemIndex, CheckState state) {
+            int stateImage = ((int)state + 1) << 12;
+            NativeMethods.SetItemState(list, itemIndex, LVIS_STATEIMAGEMASK, stateImage);
         }
 
         /// <summary>

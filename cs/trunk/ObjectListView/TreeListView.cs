@@ -295,14 +295,16 @@ namespace BrightIdeasSoftware
                 return base.CheckedObjects;
             }
             set {
-                ArrayList objectsToRecalculate = new ArrayList(this.CheckedObjects);
-                if (value != null)
-                    objectsToRecalculate.AddRange(value);
+                using (this.BeginCheckStateUpdate()) {
+                    ArrayList objectsToRecalculate = new ArrayList(this.CheckedObjects);
+                    if (value != null)
+                        objectsToRecalculate.AddRange(value);
 
-                base.CheckedObjects = value;
+                    base.CheckedObjects = value;
 
-                if (this.HierarchicalCheckboxes)
-                    RecalculateHierarchicalCheckBoxGraph(objectsToRecalculate);
+                    if (this.HierarchicalCheckboxes)
+                        RecalculateHierarchicalCheckBoxGraph(objectsToRecalculate);
+                }
             }
         }
 

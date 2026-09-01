@@ -1535,7 +1535,7 @@ namespace BrightIdeasSoftware {
             Point checkBoxLocation = new Point(r.X, this.AlignVertically(r, checkBoxSize.Height));
 
             if (this.IsPrinting || this.UseCustomCheckboxImages) {
-                int imageIndex = this.ListItem.StateImageIndex;
+                int imageIndex = (int)this.ListItem.CheckState;
                 if (this.ListView.StateImageList == null || imageIndex < 0 || imageIndex >= this.ListView.StateImageList.Images.Count)
                     return 0;
 

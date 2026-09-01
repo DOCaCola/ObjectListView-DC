@@ -1335,10 +1335,16 @@ namespace BrightIdeasSoftware
                 }
 
                 this.BeginUpdate();
-                foreach (Object x in this.Objects) {
-                    this.SetObjectCheckedness(x, table.ContainsKey(x) ? CheckState.Checked : CheckState.Unchecked);
+                try {
+                    using (this.BeginCheckStateUpdate()) {
+                        foreach (Object x in this.Objects) {
+                            this.SetObjectCheckedness(x, table.ContainsKey(x) ? CheckState.Checked : CheckState.Unchecked);
+                        }
+                    }
                 }
-                this.EndUpdate();
+                finally {
+                    this.EndUpdate();
+                }
 
                 // Debug.WriteLine(String.Format("PERF - Setting CheckedObjects on {2} objects took {0}ms / {1} ticks", sw.ElapsedMilliseconds, sw.ElapsedTicks, this.GetItemCount()));
 
@@ -6553,11 +6559,23 @@ namespace BrightIdeasSoftware
             if (this.SelectedIndices.Count == 0)
                 return;
             Object primaryModel = this.GetItem(this.SelectedIndices[0]).RowObject;
-            this.ToggleCheckObject(primaryModel);
-            CheckState? state = this.GetCheckState(primaryModel);
-            if (state.HasValue) {
-                foreach (Object x in this.SelectedObjects)
-                    this.SetObjectCheckedness(x, state.Value);
+            this.ToggleCheckObjectAndSelectedObjects(primaryModel, this.SelectedObjects);
+        }
+
+        private void ToggleCheckObjectAndSelectedObjects(Object primaryModel, IList selectedObjects) {
+            this.BeginUpdate();
+            try {
+                using (this.BeginCheckStateUpdate()) {
+                    this.ToggleCheckObject(primaryModel);
+                    CheckState? state = this.GetCheckState(primaryModel);
+                    if (state.HasValue) {
+                        foreach (Object x in selectedObjects)
+                            this.SetObjectCheckedness(x, state.Value);
+                    }
+                }
+            }
+            finally {
+                this.EndUpdate();
             }
         }
 
@@ -6617,17 +6635,13 @@ namespace BrightIdeasSoftware
                 return true;
             }
 
-            // They must have clicked the primary checkbox
-            this.ToggleCheckObject(hti.RowObject);
-
             // If they change the checkbox of a selected row, all the rows in the selection
             // should be given the same state
             if (hti.Item.Selected) {
-                CheckState? state = this.GetCheckState(hti.RowObject);
-                if (state.HasValue) {
-                    foreach (Object x in this.SelectedObjects)
-                        this.SetObjectCheckedness(x, state.Value);
-                }
+                this.ToggleCheckObjectAndSelectedObjects(hti.RowObject, this.SelectedObjects);
+            } else {
+                // They must have clicked the primary checkbox
+                this.ToggleCheckObject(hti.RowObject);
             }
 
             return true;
@@ -7759,7 +7773,8 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObject">The model object to be marked indeterminate</param>
         public virtual void CheckIndeterminateObject(object modelObject) {
-            this.SetObjectCheckedness(modelObject, CheckState.Indeterminate);
+            using (this.BeginCheckStateUpdate())
+                this.SetObjectCheckedness(modelObject, CheckState.Indeterminate);
         }
 
         /// <summary>
@@ -7767,7 +7782,8 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObject">The model object to be checked</param>
         public virtual void CheckObject(object modelObject) {
-            this.SetObjectCheckedness(modelObject, CheckState.Checked);
+            using (this.BeginCheckStateUpdate())
+                this.SetObjectCheckedness(modelObject, CheckState.Checked);
         }
 
         /// <summary>
@@ -7775,8 +7791,16 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObjects">The model object to be checked</param>
         public virtual void CheckObjects(IEnumerable modelObjects) {
-            foreach (object model in modelObjects)
-                this.CheckObject(model);
+            this.BeginUpdate();
+            try {
+                using (this.BeginCheckStateUpdate()) {
+                    foreach (object model in modelObjects)
+                        this.CheckObject(model);
+                }
+            }
+            finally {
+                this.EndUpdate();
+            }
         }
 
         /// <summary>
@@ -7837,6 +7861,159 @@ namespace BrightIdeasSoftware
         }
 
         /// <summary>
+        /// Gets whether a check state update is currently in progress.
+        /// </summary>
+        /// <remarks>
+        /// Bulk check operations use this scope while they update their individual models.
+        /// Event handlers and check state putters can use this property to defer derived work
+        /// until <see cref="CheckStateUpdateFinished"/> is raised.
+        /// </remarks>
+        [Browsable(false),
+         DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool IsCheckStateUpdateInProgress {
+            get { return this.checkStateUpdateNesting > 0; }
+        }
+
+        /// <summary>
+        /// Begin a nestable check state update.
+        /// </summary>
+        /// <remarks>
+        /// The returned scope must be disposed. The starting and finished events are raised
+        /// only for the outermost scope. Individual ItemCheck, check state putter, and
+        /// ItemChecked notifications are not suppressed.
+        /// </remarks>
+        public IDisposable BeginCheckStateUpdate() {
+            this.checkStateUpdateNesting++;
+            if (this.checkStateUpdateNesting == 1) {
+                this.pendingNativeCheckStateUpdates.Clear();
+                if (!this.VirtualMode) {
+                    this.checkStateUpdateItemMap =
+                        new Dictionary<object, OLVListItem>(ReferenceEqualityComparer.Instance);
+                    foreach (OLVListItem item in this.Items) {
+                        if (item.RowObject != null)
+                            this.checkStateUpdateItemMap[item.RowObject] = item;
+                    }
+                }
+                try {
+                    this.OnCheckStateUpdateStarting(EventArgs.Empty);
+                }
+                catch {
+                    this.checkStateUpdateItemMap = null;
+                    this.checkStateUpdateNesting--;
+                    throw;
+                }
+            }
+            return new CheckStateUpdateScope(this);
+        }
+
+        private void EndCheckStateUpdate() {
+            Debug.Assert(this.checkStateUpdateNesting > 0, "Mismatched check state update scope");
+            this.checkStateUpdateNesting--;
+            if (this.checkStateUpdateNesting == 0) {
+                try {
+                    this.ApplyPendingNativeCheckStateUpdates();
+                    this.OnCheckStateUpdateFinished(EventArgs.Empty);
+                }
+                finally {
+                    this.checkStateUpdateItemMap = null;
+                }
+            }
+        }
+
+        private void ApplyPendingNativeCheckStateUpdates() {
+            if (this.pendingNativeCheckStateUpdates.Count == 0)
+                return;
+
+            CheckState targetState = CheckState.Unchecked;
+            bool targetStateSet = false;
+            bool oneTargetState = true;
+            foreach (CheckState state in this.pendingNativeCheckStateUpdates.Values) {
+                if (!targetStateSet) {
+                    targetState = state;
+                    targetStateSet = true;
+                } else if (state != targetState) {
+                    oneTargetState = false;
+                    break;
+                }
+            }
+            if (oneTargetState
+                && !this.VirtualMode
+                && this.pendingNativeCheckStateUpdates.Count > this.GetItemCount() / 2) {
+                NativeMethods.SetItemCheckState(this, -1, targetState);
+                foreach (OLVListItem item in this.Items) {
+                    if (this.pendingNativeCheckStateUpdates.ContainsKey(item))
+                        continue;
+
+                    CheckState itemState =
+                        this.GetCheckState(item.RowObject) ?? item.CheckState;
+                    if (itemState != targetState)
+                        NativeMethods.SetItemCheckState(this, item.Index, itemState);
+                }
+            } else {
+                foreach (KeyValuePair<OLVListItem, CheckState> update
+                    in this.pendingNativeCheckStateUpdates) {
+                    NativeMethods.SetItemCheckState(
+                        this,
+                        update.Key.Index,
+                        update.Value);
+                }
+            }
+
+            this.pendingNativeCheckStateUpdates.Clear();
+        }
+
+        private sealed class CheckStateUpdateScope : IDisposable {
+            private readonly ObjectListView objectListView;
+            private bool disposed;
+
+            public CheckStateUpdateScope(ObjectListView objectListView) {
+                this.objectListView = objectListView;
+            }
+
+            public void Dispose() {
+                if (this.disposed)
+                    return;
+
+                this.disposed = true;
+                this.objectListView.EndCheckStateUpdate();
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets whether a row is rebuilt after its primary check state changes.
+        /// </summary>
+        /// <remarks>
+        /// The displayed checkbox state is always updated. Set this to false when the check
+        /// state putter and its surrounding application logic update every other displayed
+        /// aspect of the row that depends on the checked state.
+        /// </remarks>
+        [Category("ObjectListView"),
+         Description("Should a row be rebuilt after its primary check state changes?"),
+         DefaultValue(true)]
+        public bool RefreshItemOnCheckStateChange {
+            get { return this.refreshItemOnCheckStateChange; }
+            set { this.refreshItemOnCheckStateChange = value; }
+        }
+        private bool refreshItemOnCheckStateChange = true;
+
+        /// <summary>
+        /// Gets or sets whether attached rows use direct native check state updates.
+        /// </summary>
+        /// <remarks>
+        /// This avoids the substantially more expensive ListViewItem state synchronization
+        /// path. It requires a model-backed or persistent check state getter so item state
+        /// can remain authoritative without relying on ListViewItem's private managed cache.
+        /// </remarks>
+        [Category("ObjectListView"),
+         Description("Should attached rows use direct native check state updates?"),
+         DefaultValue(false)]
+        public bool UseNativeCheckStateUpdates {
+            get { return this.useNativeCheckStateUpdates; }
+            set { this.useNativeCheckStateUpdates = value; }
+        }
+        private bool useNativeCheckStateUpdates;
+
+        /// <summary>
         /// Get the checkedness of an object from the model. Returning null means the
         /// model does not know and the value from the control will be used.
         /// </summary>
@@ -7846,6 +8023,10 @@ namespace BrightIdeasSoftware
             if (this.CheckStateGetter != null) 
                 return this.CheckStateGetter(modelObject);
             return this.PersistentCheckBoxes ? this.GetPersistentCheckState(modelObject) : (CheckState?)null;
+        }
+
+        internal CheckState? GetCheckStateForItem(Object modelObject) {
+            return this.GetCheckState(modelObject);
         }
 
         /// <summary>
@@ -7873,7 +8054,8 @@ namespace BrightIdeasSoftware
         /// <returns>True if the checkedness of the model changed</returns>
         protected virtual bool SetObjectCheckedness(object modelObject, CheckState state) {
 
-            if (GetCheckState(modelObject) == state)
+            CheckState? currentState = GetCheckState(modelObject);
+            if (currentState == state)
                 return false;
 
             OLVListItem olvi = this.ModelToItem(modelObject);
@@ -7885,13 +8067,23 @@ namespace BrightIdeasSoftware
             }
 
             // Trigger checkbox changing event
-            ItemCheckEventArgs ice = new ItemCheckEventArgs(olvi.Index, state, olvi.CheckState);
+            CheckState previousState = currentState ?? olvi.CheckState;
+            ItemCheckEventArgs ice = new ItemCheckEventArgs(olvi.Index, state, previousState);
             this.OnItemCheck(ice);
-            if (ice.NewValue == olvi.CheckState)
+            if (ice.NewValue == previousState)
                 return false;
 
-            olvi.CheckState = this.PutCheckState(modelObject, state);
-            this.RefreshItem(olvi);
+            CheckState recordedState = this.PutCheckState(modelObject, state);
+            if (this.UseNativeCheckStateUpdates && this.IsHandleCreated) {
+                if (this.IsCheckStateUpdateInProgress)
+                    this.pendingNativeCheckStateUpdates[olvi] = recordedState;
+                else
+                    NativeMethods.SetItemCheckState(this, olvi.Index, recordedState);
+            } else {
+                olvi.CheckState = recordedState;
+            }
+            if (this.RefreshItemOnCheckStateChange)
+                this.RefreshItem(olvi);
 
             // Trigger check changed event
             this.OnItemChecked(new ItemCheckedEventArgs(olvi));
@@ -7906,19 +8098,22 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObject">The model object to be checked</param>
         public virtual void ToggleCheckObject(object modelObject) {
-            OLVListItem olvi = this.ModelToItem(modelObject);
-            if (olvi == null)
-                return;
+            using (this.BeginCheckStateUpdate()) {
+                OLVListItem olvi = this.ModelToItem(modelObject);
+                if (olvi == null)
+                    return;
 
-            CheckState newState = CheckState.Checked;
+                CheckState currentState = this.GetCheckState(modelObject) ?? olvi.CheckState;
+                CheckState newState = CheckState.Checked;
 
-            if (olvi.CheckState == CheckState.Checked) {
-                newState = this.TriStateCheckBoxes ? CheckState.Indeterminate : CheckState.Unchecked;
-            } else {
-                if (olvi.CheckState == CheckState.Indeterminate && this.TriStateCheckBoxes)
-                    newState = CheckState.Unchecked;
+                if (currentState == CheckState.Checked) {
+                    newState = this.TriStateCheckBoxes ? CheckState.Indeterminate : CheckState.Unchecked;
+                } else {
+                    if (currentState == CheckState.Indeterminate && this.TriStateCheckBoxes)
+                        newState = CheckState.Unchecked;
+                }
+                this.SetObjectCheckedness(modelObject, newState);
             }
-            this.SetObjectCheckedness(modelObject, newState);
         }
 
         /// <summary>
@@ -8018,7 +8213,8 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObject">The model object to be unchecked</param>
         public virtual void UncheckObject(object modelObject) {
-            this.SetObjectCheckedness(modelObject, CheckState.Unchecked);
+            using (this.BeginCheckStateUpdate())
+                this.SetObjectCheckedness(modelObject, CheckState.Unchecked);
         }
 
         /// <summary>
@@ -8026,8 +8222,16 @@ namespace BrightIdeasSoftware
         /// </summary>
         /// <param name="modelObjects">The model object to be checked</param>
         public virtual void UncheckObjects(IEnumerable modelObjects) {
-            foreach (object model in modelObjects)
-                this.UncheckObject(model);
+            this.BeginUpdate();
+            try {
+                using (this.BeginCheckStateUpdate()) {
+                    foreach (object model in modelObjects)
+                        this.UncheckObject(model);
+                }
+            }
+            finally {
+                this.EndUpdate();
+            }
         }
 
         /// <summary>
@@ -8935,6 +9139,11 @@ namespace BrightIdeasSoftware
         public virtual OLVListItem ModelToItem(object modelObject) {
             if (modelObject == null)
                 return null;
+
+            OLVListItem mappedItem;
+            if (this.checkStateUpdateItemMap != null
+                && this.checkStateUpdateItemMap.TryGetValue(modelObject, out mappedItem))
+                return mappedItem;
 
             foreach (OLVListItem olvi in this.Items) {
                 if (olvi.RowObject != null && olvi.RowObject.Equals(modelObject))
@@ -11205,12 +11414,29 @@ namespace BrightIdeasSoftware
         private bool shouldDoCustomDrawing; // should the list do its custom drawing?
         private bool isMarqueSelecting; // Is a marque selection in progress?
         private int suspendSelectionEventCount; // How many unmatched SuspendSelectionEvents() calls have been made?
+        private int checkStateUpdateNesting; // How many nested check state update scopes are active?
+        private Dictionary<object, OLVListItem> checkStateUpdateItemMap;
+        private readonly Dictionary<OLVListItem, CheckState> pendingNativeCheckStateUpdates =
+            new Dictionary<OLVListItem, CheckState>();
 
         private readonly List<GlassPanelForm> glassPanels = new List<GlassPanelForm>(); // The transparent panel that draws overlays
         private Dictionary<string, bool> visitedUrlMap = new Dictionary<string, bool>(); // Which urls have been visited?
 
         // TODO
         //private CheckBoxSettings checkBoxSettings = new CheckBoxSettings();
+
+        private sealed class ReferenceEqualityComparer : IEqualityComparer<object> {
+            public static readonly ReferenceEqualityComparer Instance =
+                new ReferenceEqualityComparer();
+
+            public new bool Equals(object x, object y) {
+                return Object.ReferenceEquals(x, y);
+            }
+
+            public int GetHashCode(object obj) {
+                return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+            }
+        }
 
         #endregion
     }
